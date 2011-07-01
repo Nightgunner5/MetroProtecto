@@ -70,6 +70,11 @@ public class MetroProtecto extends JavaPlugin {
 			getConfiguration().setProperty("protection_height", 5);
 			getConfiguration().save();
 		}
+		if (!getConfiguration().getAll().containsKey("search_radius")) {
+			// Actually it's an apothem, but I would alienate half my audience if I said so.
+			getConfiguration().setProperty("search_radius", 20);
+			getConfiguration().save();
+		}
 
 		MetroProtectoBlockListener blockListener = new MetroProtectoBlockListener(
 				this);

@@ -31,9 +31,10 @@ public class MetroProtectoCommand implements CommandExecutor {
 			return true;
 
 		ArrayList<Block> blocks = new ArrayList<Block>();
-		for (int x = -5; x <= 5; x++) {
-			for (int y = -5; y <= 5; y++) {
-				for (int z = -5; z <= 5; z++) {
+		int apothem = plugin.getConfiguration().getInt("search_radius", 20);
+		for (int x = -apothem; x <= apothem; x++) {
+			for (int y = -apothem; y <= apothem; y++) {
+				for (int z = -apothem; z <= apothem; z++) {
 					Location loc = player.getLocation().add(x, y, z);
 					if (plugin.isSpaceProtected(loc)) {
 						blocks.add(loc.getBlock());
