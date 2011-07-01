@@ -10,9 +10,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Timer;
+import java.util.TimerTask;
 
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Event;
 import org.bukkit.plugin.Plugin;
@@ -33,14 +36,40 @@ public class MetroProtecto extends JavaPlugin {
 	}
 	private PermissionHandler permissionHandler;
 	private final HashMap<RegionLocation, ArrayList<BlockLocation>> trackCache = new HashMap<RegionLocation, ArrayList<BlockLocation>>();
+	protected final HashMap<BlockLocationWorld, BlockTypeCache> blockCache = new HashMap<BlockLocationWorld, BlockTypeCache>();
 
 	@Override
 	public void onDisable() {
+		finalizeBlockCache();
+		trackCache.clear();
 	}
 
 	@Override
 	public void onEnable() {
 		setupPermissions();
+		finalizeBlockCache();
+
+		getConfiguration()
+				.setHeader(
+						"# Permissions:",
+						"# metroprotecto.protecttracks.build   - Users with this permission will have their tracks protected",
+						"# metroprotecto.protecttracks.destroy - Can destroy protected tracks",
+						"# metroprotecto.protecttracks.find    - Can use the /metroprotecto command to locate protected tracks.",
+						"# metroprotecto.neartracks.build      - Can build near protected tracks (within the protected zone, but not where the tracks are)",
+						"# metroprotecto.neartracks.destroy    - Can destroy things near protected tracks (includes starting fires, does not include the actual tracks)",
+						"#",
+						"# In addition, liquid flow and fire spread are disabled within the protection zone.",
+						"");
+		getConfiguration().save();
+
+		if (!getConfiguration().getAll().containsKey("protection_radius")) {
+			getConfiguration().setProperty("protection_radius", 3);
+			getConfiguration().save();
+		}
+		if (!getConfiguration().getAll().containsKey("protection_height")) {
+			getConfiguration().setProperty("protection_height", 5);
+			getConfiguration().save();
+		}
 
 		MetroProtectoBlockListener blockListener = new MetroProtectoBlockListener(
 				this);
@@ -53,6 +82,37 @@ public class MetroProtecto extends JavaPlugin {
 				Event.Priority.Normal, this);
 		pm.registerEvent(Event.Type.BLOCK_FROMTO, blockListener,
 				Event.Priority.Normal, this);
+
+		MetroProtectoCommand command = new MetroProtectoCommand(this);
+		getCommand("metroprotecto").setExecutor(command);
+	}
+
+	@SuppressWarnings("unchecked")
+	private void finalizeBlockCache() {
+		if (blockCache.isEmpty()) {
+			try {
+				File cacheFile = new File(getDataFolder(), "blockcache.dat");
+				if (!cacheFile.exists())
+					return;
+				ObjectInputStream in = new ObjectInputStream(
+						new FileInputStream(cacheFile));
+				blockCache
+						.putAll((HashMap<BlockLocationWorld, BlockTypeCache>) in
+								.readObject());
+				in.close();
+				cacheFile.delete();
+			} catch (IOException ex) {
+				return;
+			} catch (ClassNotFoundException ex) {
+				return;
+			}
+		}
+		for (BlockTypeCache cache : blockCache.values()) {
+			Block block = getServer().getWorld(cache.world).getBlockAt(cache.x,
+					cache.y, cache.z);
+			cache.apply(block);
+		}
+		blockCache.clear();
 	}
 
 	private void setupPermissions() {
@@ -92,7 +152,7 @@ public class MetroProtecto extends JavaPlugin {
 	}
 
 	@SuppressWarnings("unchecked")
-	private boolean isSpaceProtected(Location location) {
+	public boolean isSpaceProtected(Location location) {
 		RegionLocation region = new RegionLocation(location);
 		ArrayList<BlockLocation> tracks;
 		if (trackCache.containsKey(region)) {
@@ -118,8 +178,7 @@ public class MetroProtecto extends JavaPlugin {
 			}
 		}
 
-		return tracks.contains(new int[] { location.getBlockX(),
-				location.getBlockY(), location.getBlockZ() });
+		return tracks.contains(new BlockLocation(location));
 	}
 
 	public boolean isNearTrain(Location location) {
@@ -155,6 +214,7 @@ public class MetroProtecto extends JavaPlugin {
 			ObjectOutputStream out = new ObjectOutputStream(
 					new FileOutputStream(regionFile));
 			out.writeObject(locations);
+			out.flush();
 			out.close();
 		} catch (IOException ex) {
 		}
@@ -192,5 +252,76 @@ public class MetroProtecto extends JavaPlugin {
 		tracks.remove(new BlockLocation(location));
 
 		saveRegionFile(region, tracks);
+	}
+
+	public synchronized void temporaryChangeBlock(Block block,
+			final Material changeTo, byte data, long timeout) {
+		temporaryChangeBlock(Collections.singletonList(block), changeTo, data,
+				timeout);
+	}
+
+	public synchronized void temporaryChangeBlock(List<Block> blocks,
+			final Material changeTo, byte data, long timeout) {
+		final ArrayList<Block> changedBlocks = new ArrayList<Block>();
+		for (Block block : blocks) {
+			BlockLocationWorld loc = new BlockLocationWorld(block.getLocation());
+			if (blockCache.containsKey(loc)) {
+				continue;
+			}
+			blockCache.put(loc, new BlockTypeCache(block));
+		}
+		saveBlockCache();
+		for (Block block : changedBlocks) {
+			block.setType(changeTo);
+			block.setData(data);
+		}
+		new Timer().schedule(new TimerTask() {
+			@Override
+			public void run() {
+				for (Block block : changedBlocks) {
+					BlockLocationWorld loc = new BlockLocationWorld(block
+							.getLocation());
+					BlockTypeCache cache = blockCache.get(loc);
+					if (cache != null) {
+						cache.apply(block);
+					}
+					blockCache.remove(loc);
+				}
+				saveBlockCache();
+			}
+		}, timeout);
+	}
+
+	public synchronized void temporaryChangeBlock(final Player player,
+			final List<Block> blocks, final Material changeTo, byte data,
+			long timeout) {
+		for (Block block : blocks) {
+			player.sendBlockChange(block.getLocation(), changeTo, data);
+		}
+		new Timer().schedule(new TimerTask() {
+			@Override
+			public void run() {
+				for (Block block : blocks) {
+					player.sendBlockChange(block.getLocation(),
+							block.getType(), block.getData());
+				}
+			}
+		}, timeout);
+	}
+
+	private synchronized void saveBlockCache() {
+		File cacheFile = new File(getDataFolder(), "blockcache.dat");
+		if (blockCache.isEmpty()) {
+			cacheFile.delete();
+			return;
+		}
+		try {
+			ObjectOutputStream out = new ObjectOutputStream(
+					new FileOutputStream(cacheFile));
+			out.writeObject(blockCache);
+			out.flush();
+			out.close();
+		} catch (IOException ex) {
+		}
 	}
 }

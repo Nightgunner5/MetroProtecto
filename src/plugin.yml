@@ -1,3 +1,7 @@
 name: MetroProtecto
 main: net.llamaslayers.minecraft.metroprotecto.MetroProtecto
 version: 0.1
+commands:
+  metroprotecto:
+    usage: /metroprotecto
+    permission: metroprotecto.protecttracks.find
