@@ -163,6 +163,7 @@ public class MetroProtecto extends JavaPlugin {
 		if (trackCache.containsKey(region)) {
 			tracks = trackCache.get(region);
 		} else {
+			trackCache.put(region, new ArrayList<BlockLocation>()); // Will be overwritten if the file is found. Otherwise, this prevents epic lag.
 			File worldDir = new File(getDataFolder(), region.world);
 			if (!worldDir.exists())
 				return false;
